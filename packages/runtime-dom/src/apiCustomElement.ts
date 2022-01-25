@@ -173,6 +173,10 @@ export class VueElement extends BaseClass {
         )
       }
       this.attachShadow({ mode: 'open' })
+      if (!(this._def as ComponentOptions).__asyncLoader) {
+        // for sync component defs we can immediately resolve props
+        this._resolveProps(this._def)
+      }
     }
   }
 
@@ -214,10 +218,9 @@ export class VueElement extends BaseClass {
       }
     }).observe(this, { attributes: true })
 
-    const resolve = (def: InnerComponentDef) => {
-      const { props, styles } = def
+    const resolve = (def: InnerComponentDef, isAsync = false) => {
+      const { props = [], styles } = def
       const hasOptions = !isArray(props)
-      const rawKeys = props ? (hasOptions ? Object.keys(props) : props) : []
 
       // cast Number-type props set before resolve
       let numberProps
@@ -232,23 +235,10 @@ export class VueElement extends BaseClass {
       }
       this._numberProps = numberProps
 
-      // check if there are props set pre-upgrade or connect
-      for (const key of Object.keys(this)) {
-        if (key[0] !== '_') {
-          this._setProp(key, this[key as keyof this], true, false)
-        }
-      }
-
-      // defining getter/setters on prototype
-      for (const key of rawKeys.map(camelize)) {
-        Object.defineProperty(this, key, {
-          get() {
-            return this._getProp(key)
-          },
-          set(val) {
-            this._setProp(key, val)
-          }
-        })
+      if (isAsync) {
+        // defining getter/setters on prototype
+        // for sync defs, this already happened in the constructor
+        this._resolveProps(def)
       }
 
       // apply CSS
@@ -260,9 +250,34 @@ export class VueElement extends BaseClass {
 
     const asyncDef = (this._def as ComponentOptions).__asyncLoader
     if (asyncDef) {
-      asyncDef().then(resolve)
+      asyncDef().then(def => resolve(def, true))
     } else {
       resolve(this._def)
+    }
+  }
+
+  private _resolveProps(def: InnerComponentDef) {
+    // check if there are props set pre-upgrade or connect
+    for (const key of Object.keys(this)) {
+      if (key[0] !== '_') {
+        this._setProp(key, this[key as keyof this], true, false)
+      }
+    }
+
+    const { props } = def
+    const hasOptions = !isArray(props)
+    const rawKeys = props ? (hasOptions ? Object.keys(props) : props) : []
+
+    // defining getter/setters on prototype
+    for (const key of rawKeys.map(camelize)) {
+      Object.defineProperty(this, key, {
+        get() {
+          return this._getProp(key)
+        },
+        set(val) {
+          this._setProp(key, val)
+        }
+      })
     }
   }
 
